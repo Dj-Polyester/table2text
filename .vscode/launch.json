@@ -1,0 +1,45 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+
+        {
+            "name": "Python Debugger: Current File",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${file}",
+            "python": "${workspaceFolder}/.venv/bin/python",
+            "console": "integratedTerminal",
+            "purpose": [
+                "debug-in-terminal"
+            ]
+        },
+        {
+            "name": "Train ILM (arxiv_cs_abstracts)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/train_ilm.py",
+            "python": "${workspaceFolder}/.venv/bin/python",
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "args": [
+                "experiment_arxiv_cs_abstracts",
+                "train",
+                "data/char_masks/arxiv_cs_abstracts",
+                "--seed",
+                "0",
+                "--train_examples_tag",
+                "train",
+                "--eval_examples_tag",
+                "valid",
+                "--eval_max_num_examples",
+                "512",
+                "--data_no_cache",
+                "--data_loader_num_workers",
+                "16",
+            ]
+        },
+    ]
+}

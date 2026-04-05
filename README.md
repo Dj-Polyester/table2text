@@ -1,20 +1,41 @@
 ## Infilling by Language Modeling (ILM)
 
-This repository houses the code for the ILM framework outlined in the ACL 2020 paper [_Enabling language models to fill in the blanks_](https://arxiv.org/abs/2005.05339) (Donahue et al. 2020).
+This repository houses the code for the ILM framework outlined in the ACL 2020 paper *[Enabling language models to fill in the blanks](https://arxiv.org/abs/2005.05339)* (Donahue et al. 2020).
 
-This codebase allows you to fine tune GPT-2 to _infill_, i.e., perform text generation conditioned on both past and future context. For example, you could train GPT-2 to infill proper nouns in news articles, or generate lines of poetry in the middle of the stanza.
+This codebase allows you to fine tune GPT-2 to *infill*, i.e., perform text generation conditioned on both past and future context. For example, you could train GPT-2 to infill proper nouns in news articles, or generate lines of poetry in the middle of the stanza.
 
 An interactive webdemo can be found at [chrisdonahue.com/ilm](https://chrisdonahue.com/ilm).
 
 ## Installation
 
-We recommend installing this package using `virtualenv`. After activating the virtual environment, run the following commands:
+Recommended Python version: `3.14.3`.
 
-1. `git clone git@github.com:chrisdonahue/ilm.git`
-1. `cd ilm`
-1. `pip install -r requirements.txt`
-1. `python -c "import nltk; nltk.download('punkt')"`
-1. `pip install -e .`
+We recommend installing this package using `virtualenv`. After activating the virtual environment, run:
+
+```sh
+git clone git@github.com:chrisdonahue/ilm.git
+cd ilm
+pip install -r requirements.txt
+python -c "import nltk; nltk.download('punkt')"
+pip install -e .
+```
+
+If you run into Python compatibility issues, use `pyenv` to install and select Python `3.14.3`:
+
+```sh
+# Install pyenv (one-time)
+curl https://pyenv.run | bash
+
+# Install and use Python 3.14.3
+pyenv install 3.14.3
+pyenv local 3.14.3
+
+# Recreate environment with this interpreter
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+pip install -e .
+```
 
 ## Training a new model
 
@@ -24,25 +45,7 @@ The ILM framework involves a two step process of (1) creating ILM training examp
 
 The process of creating ILM examples involves randomly masking spans in complete text. For example, if the original text is `She ate leftover pasta for lunch`, an ILM example might look like `She ate [blank] for [blank] [sep] leftover pasta [answer] lunch [answer]`. For efficiency reasons, this codebase generates these examples up front before training.
 
-The following script will download a dataset of scientific abstracts collected from arXiv and then create ILM examples for training:
-
-```sh
-DATASET=arxiv_cs_abstracts
-
-pushd data
-./get_${DATASET}.sh
-popd
-
-for SPLIT in train valid
-do
-	python create_ilm_examples.py \
-		${SPLIT} \
-		data/char_masks/${DATASET} \
-		--seed 0 \
-		--data_name ${DATASET} \
-		--data_split ${SPLIT}
-done
-```
+Run `./create_examples.sh` to download the `arxiv_cs_abstracts` dataset and build training/validation ILM examples.
 
 Before training, you can optionally preview these examples
 
@@ -53,23 +56,17 @@ python preview_ilm_examples.py \
 
 ### Training an ILM model
 
-Once you've created training examples, you can start training an ILM model (fine-tuning GPT-2):
-
-```sh
-DATASET=arxiv_cs_abstracts
-TRAIN_DIR=train
-EXAMPLES_DIR=data/char_masks/${DATASET}
-python train_ilm.py \
-	experiment_${DATASET} \
-	${TRAIN_DIR} \
-	${EXAMPLES_DIR} \
-	--seed 0 \
-	--train_examples_tag train \
-	--eval_examples_tag valid \
-	--eval_max_num_examples 512
-```
+Once you've created training examples, run `./train.sh` to start fine-tuning GPT-2 as an ILM model.
 
 Note that the training script automatically performs early stopping based on PPL on the validation set. To monitor training, you can set up an account on [Weights and Biases](https://www.wandb.com) and add the `--wandb` flag.
+
+### End-to-end order
+
+Run the project scripts in this order:
+
+1. `./create_examples.sh` - downloads `arxiv_cs_abstracts` and creates `train`/`valid` masked examples.
+2. `python preview_ilm_examples.py data/char_masks/arxiv_cs_abstracts/train.pkl` (optional) - inspects generated examples.
+3. `./train.sh` - launches model training with the generated examples.
 
 ## Using custom datasets and mask functions
 
@@ -77,7 +74,7 @@ This codebase includes scripts to download the three datasets used in our paper:
 
 ### Custom datasets
 
-To add a new dataset, first split it into three files: `train.txt`, `valid.txt`, `test.txt`. These files each contain complete documents separated by _three_ newline characters, i.e., `'\n\n\n'.join(documents)`. Then, run `create_ilm_examples.py` with the following arguments: `--data_name custom --data_dir path/to/directory/with/splits`.
+To add a new dataset, first split it into three files: `train.txt`, `valid.txt`, `test.txt`. These files each contain complete documents separated by *three* newline characters, i.e., `'\n\n\n'.join(documents)`. Then, run `create_ilm_examples.py` with the following arguments: `--data_name custom --data_dir path/to/directory/with/splits`.
 
 ### Custom mask functions
 
@@ -85,7 +82,7 @@ A mask function takes text and outputs random spans to masked which correspond t
 
 You can add your own mask functions to perform different infilling tasks. A mask function takes as input a complete document and outputs a list of 3-tuples consisting of `(infilling type, span offset, span length)`, where offset and length are measured in characters.
 
-You can add your custom mask function to [`ilm.mask.custom`](https://github.com/chrisdonahue/ilm_final/blob/master/ilm/mask/custom.py), where there are already two simple examples:
+You can add your custom mask function to `[ilm.mask.custom](https://github.com/chrisdonahue/ilm_final/blob/master/ilm/mask/custom.py)`, where there are already two simple examples:
 
 - `ilm.mask.custom.MaskPunctuation`: Masks each punctuation token with 50% probability. Special infilling type for sentence terminals.
 - `ilm.mask.custom.MaskProperNoun`: Masks all (detected) proper nouns with 100% probability.
@@ -103,7 +100,7 @@ See `inference.ipynb` for an example of how to perform infilling with a trained 
 We've included a script `acl20_repro_train.py` which will re-train models using the same hyperparameters we used in our ACL paper. This script will print out another script which, if run, downloads the training examples and re-trains the model. The script takes two arguments:
 
 1. Dataset name: One of `abstracts`, `stories`, or `lyrics`
-1. Model type: One of `lm`, `lmrev`, `lmall`, `ilm`, `lmscratch`, `lmrevscratch`, `lmallscratch`, `ilmscratch`
+2. Model type: One of `lm`, `lmrev`, `lmall`, `ilm`, `lmscratch`, `lmrevscratch`, `lmallscratch`, `ilmscratch`
 
 For example, to train an ILM on the stories dataset, run:
 
@@ -116,11 +113,11 @@ Each experiment will take 1-2 days on a GPU, and early stopping is performed aut
 
 ### Evaluation
 
-We've included a script `acl20_repro_eval.py` which _exactly_ reproduces PPL numbers found in our ACL paper. This script will print out another script which, if run, downloads the relevant pre-trained model (~500MB) and pre-masked test data and computes the PPL. It takes three arguments:
+We've included a script `acl20_repro_eval.py` which *exactly* reproduces PPL numbers found in our ACL paper. This script will print out another script which, if run, downloads the relevant pre-trained model (~500MB) and pre-masked test data and computes the PPL. It takes three arguments:
 
 1. Dataset name: One of `abstracts`, `stories`, or `lyrics`
-1. Model type: One of `lm`, `lmrev`, `lmall`, `ilm`, `lmscratch`, `lmrevscratch`, `lmallscratch`, `ilmscratch`
-1. Infilling type: One of `sentence`, `document`, `mixture`, `paragraph`, `ngram`, or `word` for paper Tables 1, 3, 4, 5, 7, and 8, respectively
+2. Model type: One of `lm`, `lmrev`, `lmall`, `ilm`, `lmscratch`, `lmrevscratch`, `lmallscratch`, `ilmscratch`
+3. Infilling type: One of `sentence`, `document`, `mixture`, `paragraph`, `ngram`, or `word` for paper Tables 1, 3, 4, 5, 7, and 8, respectively
 
 For example, to reproduce PPL of ILM on the sentence infilling task for the Stories dataset (`15.6` in bottom left of Table 1), run:
 
@@ -145,3 +142,4 @@ If you use this codebase in your work, please consider citing our paper:
   year = {2020},
 }
 ```
+

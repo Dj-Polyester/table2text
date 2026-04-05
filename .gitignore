@@ -1,9 +1,11 @@
 data/
 ilm.egg-info/
 __pycache__
-*.sh
 .evaltmp
 wandb/
 .*.swp
 .ipynb_checkpoints
 *.pyc
+*.pkl
+*.npy
+.python-version

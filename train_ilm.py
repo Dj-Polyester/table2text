@@ -4,15 +4,17 @@ import multiprocessing
 import os
 import pickle
 import random
+import sys
 import time
 import warnings
 
 import numpy as np
 import torch
 import torch.nn.functional as F
+from torch.optim import AdamW
 from torch.utils.data import (DataLoader, RandomSampler, SequentialSampler, TensorDataset)
 from tqdm import tqdm
-from transformers import GPT2Config, GPT2LMHeadModel, AdamW, CONFIG_NAME, WEIGHTS_NAME
+from transformers import GPT2Config, GPT2LMHeadModel, CONFIG_NAME, WEIGHTS_NAME
 try:
   import wandb
 except:
@@ -638,6 +640,20 @@ def train(args):
 
 if __name__ == '__main__':
   from argparse import ArgumentParser
+
+  # Debuggers often use a non-fork start method; enforce fork on Linux so
+  # multiprocessing workers inherit module-level globals used by this script.
+  debug_session = (
+      sys.gettrace() is not None or
+      'DEBUGPY_LAUNCHER_PORT' in os.environ or
+      'PYCHARM_HOSTED' in os.environ)
+  if sys.platform.startswith('linux') and (debug_session or multiprocessing.get_start_method(allow_none=True) != 'fork'):
+    try:
+      multiprocessing.set_start_method('fork', force=True)
+    except Exception as e:
+      warnings.warn('Could not set multiprocessing start method to fork (debug_session={}): {}'.format(debug_session, e))
+
+  print("Start method: ", multiprocessing.get_start_method(allow_none=True))
 
   parser = ArgumentParser()
 

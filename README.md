@@ -10,17 +10,7 @@ An interactive webdemo can be found at [chrisdonahue.com/ilm](https://chrisdonah
 
 Recommended Python version: `3.14.3`.
 
-We recommend installing this package using `virtualenv`. After activating the virtual environment, run:
-
-```sh
-git clone git@github.com:chrisdonahue/ilm.git
-cd ilm
-pip install -r requirements.txt
-python -c "import nltk; nltk.download('punkt')"
-pip install -e .
-```
-
-If you run into Python compatibility issues, use `pyenv` to install and select Python `3.14.3`:
+We recommend installing this package using `virtualenv`. 
 
 ```sh
 # Install pyenv (one-time)
@@ -30,11 +20,11 @@ curl https://pyenv.run | bash
 pyenv install 3.14.3
 pyenv local 3.14.3
 
-# Recreate environment with this interpreter
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-pip install -e .
+# Or create environment with the interpreter using uv
+uv venv --python 3.14 --seed
+. .venv/bin/activate
+uv pip install -r requirements.txt
+uv pip install -e .
 ```
 
 ## Training a new model

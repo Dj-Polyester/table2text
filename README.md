@@ -47,6 +47,12 @@ The process of creating ILM examples involves randomly masking spans in complete
 
 Run `./create_examples.sh` to download the `arxiv_cs_abstracts` dataset and build training/validation ILM examples.
 
+To limit how many documents are processed per split, pass `--limit`:
+
+```sh
+./create_examples.sh --limit 100
+```
+
 Before training, you can optionally preview these examples
 
 ```sh
@@ -64,7 +70,7 @@ Note that the training script automatically performs early stopping based on PPL
 
 Run the project scripts in this order:
 
-1. `./create_examples.sh` - downloads `arxiv_cs_abstracts` and creates `train`/`valid` masked examples.
+1. `./create_examples.sh` - downloads `arxiv_cs_abstracts` and creates `train`/`val` masked examples.
 2. `python preview_ilm_examples.py data/char_masks/arxiv_cs_abstracts/train.pkl` (optional) - inspects generated examples.
 3. `./train.sh` - launches model training with the generated examples.
 
@@ -74,7 +80,7 @@ This codebase includes scripts to download the three datasets used in our paper:
 
 ### Custom datasets
 
-To add a new dataset, first split it into three files: `train.txt`, `valid.txt`, `test.txt`. These files each contain complete documents separated by *three* newline characters, i.e., `'\n\n\n'.join(documents)`. Then, run `create_ilm_examples.py` with the following arguments: `--data_name custom --data_dir path/to/directory/with/splits`.
+To add a new dataset, first split it into three files: `train.txt`, `val.txt`, `test.txt`. These files each contain complete documents separated by *three* newline characters, i.e., `'\n\n\n'.join(documents)`. Then, run `create_ilm_examples.py` with the following arguments: `--data_name custom --data_dir path/to/directory/with/splits`.
 
 ### Custom mask functions
 

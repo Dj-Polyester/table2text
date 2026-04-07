@@ -14,8 +14,8 @@ class TestCreateIlmExamples(unittest.TestCase):
     random.seed(0)
 
     docs = ilm.datasets.get_dataset(
-        ilm.datasets.Dataset.ROC_STORIES,
-        'valid',
+        ilm.datasets.ILMDataset.ROC_STORIES,
+        'val',
         shuffle=True,
         limit=100)
     self.assertTrue('Jen was waiting for a package all day' in docs[0])

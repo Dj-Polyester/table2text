@@ -17,7 +17,7 @@
             ]
         },
         {
-            "name": "Train ILM (arxiv_cs_abstracts)",
+            "name": "Train ILM (wiki_bio)",
             "type": "debugpy",
             "request": "launch",
             "program": "${workspaceFolder}/train_ilm.py",
@@ -25,20 +25,41 @@
             "cwd": "${workspaceFolder}",
             "console": "integratedTerminal",
             "args": [
-                "experiment_arxiv_cs_abstracts",
+                "experiment_wiki_bio",
                 "train",
-                "data/char_masks/arxiv_cs_abstracts",
+                "data/char_masks/wiki_bio",
                 "--seed",
                 "0",
                 "--train_examples_tag",
                 "train",
                 "--eval_examples_tag",
-                "valid",
+                "val",
                 "--eval_max_num_examples",
                 "512",
                 "--data_no_cache",
                 "--data_loader_num_workers",
                 "16",
+            ]
+        },
+        {
+            "name": "create ILM Examples (wiki_bio)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/create_ilm_examples.py",
+            "python": "${workspaceFolder}/.venv/bin/python",
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "args": [
+                "test",
+                "data/char_masks/wiki_bio",
+                "--seed",
+                "0",
+                "--data_name",
+                "wiki_bio",
+                "--data_split",
+                "test",
+                "--max_num_documents",
+                "100",
             ]
         },
     ]

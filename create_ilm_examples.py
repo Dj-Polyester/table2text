@@ -1,6 +1,8 @@
 from collections import Counter
+import multiprocessing as mp
 import os
 import random
+from datasets import Dataset, Features, Sequence, Value
 
 from ilm.mask.util import masked_spans_bounds_valid, masked_spans_overlap
 
@@ -65,30 +67,104 @@ def randomly_mask_document(
   return [list(m) for m in doc_masks], error_to_count
 
 
+_MP_MASKER = None
+_MP_NUM_EXAMPLES_PER_DOCUMENT = None
+_MP_MAX_NUM_RETRIES = None
+_MP_RANDOMLY_MASK_KWARGS = None
+
+
+def _init_randomly_mask_dataset_worker(masker, num_examples_per_document, max_num_retries, kwargs):
+  global _MP_MASKER
+  global _MP_NUM_EXAMPLES_PER_DOCUMENT
+  global _MP_MAX_NUM_RETRIES
+  global _MP_RANDOMLY_MASK_KWARGS
+  _MP_MASKER = masker
+  _MP_NUM_EXAMPLES_PER_DOCUMENT = num_examples_per_document
+  _MP_MAX_NUM_RETRIES = max_num_retries
+  _MP_RANDOMLY_MASK_KWARGS = kwargs
+
+
+def _randomly_mask_dataset_worker(task):
+  index, doc, seed = task
+  random.seed(seed)
+  doc_masks, error_to_count = randomly_mask_document(
+      doc,
+      _MP_MASKER,
+      _MP_NUM_EXAMPLES_PER_DOCUMENT,
+      _MP_MAX_NUM_RETRIES,
+      **_MP_RANDOMLY_MASK_KWARGS)
+  return index, doc, doc_masks, error_to_count
+
+
 def randomly_mask_dataset(
     docs,
     masker,
     num_examples_per_document,
     max_num_retries,
     tqdm=lambda x: x,
+    num_workers=1,
     **kwargs):
   docs_masked = []
 
+  if isinstance(docs, Dataset):
+    target_texts = docs["target_text"][:]
+    input_texts = docs["input_text"][:]
+  else:
+    target_texts = docs
+
   error_to_count_total = Counter()
 
-  num_retries_total = 0
-  for doc in tqdm(docs):
-    doc_masks, error_to_count = randomly_mask_document(
-        doc,
-        masker,
-        num_examples_per_document,
-        max_num_retries,
-        **kwargs)
-    docs_masked.append((doc, doc_masks))
-    for k, v in error_to_count.items():
-      error_to_count_total[k] += v
+  if num_workers <= 1:
+    for doc in tqdm(target_texts):
+      doc_masks, error_to_count = randomly_mask_document(
+          doc,
+          masker,
+          num_examples_per_document,
+          max_num_retries,
+          **kwargs)
+      docs_masked.append((doc, doc_masks))
+      for k, v in error_to_count.items():
+        error_to_count_total[k] += v
+  else:
+    seeds = [random.randint(0, 2**32 - 1) for _ in range(len(target_texts))]
+    tasks = ((i, doc, seeds[i]) for i, doc in enumerate(target_texts))
+    with mp.Pool(
+        processes=num_workers,
+        initializer=_init_randomly_mask_dataset_worker,
+        initargs=(masker, num_examples_per_document, max_num_retries, kwargs)) as pool:
+      results = pool.imap(_randomly_mask_dataset_worker, tasks)
+      try:
+        results = tqdm(results, total=len(target_texts))
+      except TypeError:
+        results = tqdm(results)
+      for _, doc, doc_masks, error_to_count in results:
+        docs_masked.append((doc, doc_masks))
+        for k, v in error_to_count.items():
+          error_to_count_total[k] += v
 
-  return docs_masked, error_to_count_total
+  if isinstance(docs, Dataset):
+    def _serialize_span_value(v):
+      # Mask type can be an Enum (e.g., MaskHierarchicalType); Arrow cannot store it directly.
+      return int(v.value) if hasattr(v, "value") else int(v)
+
+    target_text_struct = [{
+        "doc": doc,
+        "char_masks": [[[_serialize_span_value(v) for v in span] for span in masked_spans] for masked_spans in doc_masks],
+    } for doc, doc_masks in docs_masked]
+    outds = Dataset.from_dict({
+        "input_text": input_texts,
+        "target_text": target_text_struct,
+    }, features=Features({
+        "input_text": docs.features["input_text"],
+        "target_text": {
+            "doc": Value("string"),
+            "char_masks": Sequence(Sequence(Sequence(Value("int64")))),
+        },
+    }))
+  else:
+    outds = docs_masked
+
+  return outds, error_to_count_total
 
 
 if __name__ == '__main__':
@@ -99,7 +175,7 @@ if __name__ == '__main__':
 
   from tqdm import tqdm
   
-  from ilm.datasets import Dataset, get_dataset
+  from ilm.datasets import ILMDataset, get_dataset
   import ilm.mask
   from ilm.mask.util import mask_cls_str_to_type
 
@@ -110,7 +186,7 @@ if __name__ == '__main__':
   parser.add_argument('--seed', type=int)
 
   data_args = parser.add_argument_group('Dataset')
-  data_args.add_argument('--data_name', type=str, choices=[t.name.lower() for t in Dataset])
+  data_args.add_argument('--data_name', type=str, choices=[t.name.lower() for t in ILMDataset])
   data_args.add_argument('--data_dir', type=str)
   data_args.add_argument('--data_split', type=str)
 
@@ -121,13 +197,14 @@ if __name__ == '__main__':
   parser.add_argument('--max_num_documents', type=int)
   parser.add_argument('--num_examples_per_document', type=int)
   parser.add_argument('--max_num_retries_per_example', type=int)
+  parser.add_argument('--num_workers', type=int)
   parser.add_argument('--min_masked_spans_per_example', type=int)
   parser.add_argument('--max_masked_spans_per_example', type=int)
   parser.add_argument('--allow_duplicate_examples', action='store_false', dest='ensure_unique_examples')
 
   parser.set_defaults(
       seed=None,
-      data_name='arxiv_cs_abstracts',
+      data_name='wiki_bio',
       data_dir=None,
       data_split='train',
       mask_cls='ilm.mask.hierarchical.MaskHierarchical',
@@ -135,6 +212,7 @@ if __name__ == '__main__':
       max_num_documents=None,
       num_examples_per_document=16,
       max_num_retries_per_example=16,
+      num_workers=mp.cpu_count(),
       min_masked_spans_per_example=None,
       max_masked_spans_per_example=None,
       ensure_unique_examples=True)
@@ -149,7 +227,7 @@ if __name__ == '__main__':
   random.seed(seed)
 
   # Load data
-  dataset = Dataset[args.data_name.upper()]
+  dataset = ILMDataset[args.data_name.upper()]
   docs = get_dataset(
       dataset,
       args.data_split,
@@ -170,6 +248,7 @@ if __name__ == '__main__':
       masker,
       args.num_examples_per_document,
       max_num_retries=args.max_num_retries_per_example,
+      num_workers=args.num_workers,
       min_masked_spans=args.min_masked_spans_per_example,
       max_masked_spans=args.max_masked_spans_per_example,
       random_sample_down_to_max=True,
@@ -178,9 +257,14 @@ if __name__ == '__main__':
       ensure_unique=args.ensure_unique_examples,
       tqdm=tqdm)
 
+  if isinstance(masked_data, Dataset):
+    masked_data_sent = [(row["doc"], row["char_masks"]) for row in masked_data["target_text"]]
+  else:
+    masked_data_sent = masked_data
+
   # Print stats
   num_documents = len(docs)
-  num_masked_examples = sum([len(exs) for d, exs in masked_data])
+  num_masked_examples = sum([len(exs) for d, exs in masked_data_sent])
   num_masked_examples_expected = len(docs) * args.num_examples_per_document
   print('Processed {} documents and created {} examples per document (expected {})'.format(
     num_documents,
@@ -193,7 +277,7 @@ if __name__ == '__main__':
       print('* ({} retries) {}'.format(v, k))
   num_chars_total = 0
   num_chars_masked = 0
-  for doc, char_masks in masked_data:
+  for doc, char_masks in masked_data_sent:
     num_chars_total += len(doc) * len(char_masks)
     for masked_spans in char_masks:
       num_chars_masked += sum([l for _, _, l in masked_spans])
@@ -202,5 +286,9 @@ if __name__ == '__main__':
   # Save examples
   if not os.path.isdir(args.out_dir):
     os.makedirs(args.out_dir)
-  with open(os.path.join(args.out_dir, '{}.pkl'.format(args.tag)), 'wb') as f:
-    pickle.dump(masked_data, f)
+  
+  if isinstance(masked_data, Dataset):
+    masked_data.save_to_disk(os.path.join(args.out_dir, args.tag))
+  else:
+    with open(os.path.join(args.out_dir, '{}.pkl'.format(args.tag)), 'wb') as f:
+      pickle.dump(masked_data, f)

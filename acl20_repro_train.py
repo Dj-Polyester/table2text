@@ -44,7 +44,7 @@ if __name__ == '__main__':
 
   data_tag = dataset[:3]
   train_data_url = PREMASKED_DATA['train']['{}_mixture'.format(data_tag)]
-  valid_data_url = PREMASKED_DATA['valid']['{}_mixture'.format(data_tag)]
+  valid_data_url = PREMASKED_DATA['val']['{}_mixture'.format(data_tag)]
 
   if 'lyr' in dataset:
     mask_cls = 'ilm.mask.hierarchical.MaskHierarchicalVerse'

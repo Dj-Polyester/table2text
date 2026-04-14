@@ -1,47 +1,56 @@
 from enum import Enum
 import os
 import random
+from datasets import load_dataset, Dataset, DatasetDict
 
 from .paths import RAW_DATA_DIR
 
-class Dataset(Enum):
+class ILMDataset(Enum):
   CUSTOM = 0
   ARXIV_CS_ABSTRACTS = 1
   ROC_STORIES = 2
   ROC_STORIES_NO_TITLE = 3
   LYRICS_STANZAS = 4
+  WIKI_BIO = 5
 
 
 def get_dataset(dataset, split, *args, data_dir=None, shuffle=False, limit=None, **kwargs):
-  if type(dataset) != Dataset:
+  if type(dataset) != ILMDataset:
     raise ValueError('Must specify a Dataset enum value')
 
-  if dataset == Dataset.CUSTOM:
+  if dataset == ILMDataset.CUSTOM:
     d = custom(split, data_dir)
     if data_dir is None:
       raise ValueError('Data dir must be specified for custom dataset')
-  elif dataset == Dataset.ARXIV_CS_ABSTRACTS:
+  elif dataset == ILMDataset.ARXIV_CS_ABSTRACTS:
     d = arxiv_cs_abstracts(split, *args, data_dir=data_dir, **kwargs)
-  elif dataset == Dataset.ROC_STORIES:
+  elif dataset == ILMDataset.ROC_STORIES:
     d = roc_stories(split, *args, data_dir=data_dir, **kwargs)
-  elif dataset == Dataset.ROC_STORIES_NO_TITLE:
+  elif dataset == ILMDataset.ROC_STORIES_NO_TITLE:
     d = roc_stories(split, *args, data_dir=data_dir, with_titles=False, **kwargs)
-  elif dataset == Dataset.LYRICS_STANZAS:
-    assert split in ['train', 'valid', 'test']
+  elif dataset == ILMDataset.LYRICS_STANZAS:
+    assert split in ['train', 'val', 'test']
     if data_dir is None:
       data_dir = os.path.join(RAW_DATA_DIR, 'lyrics_stanzas')
     d = custom(split, data_dir=data_dir)
+  elif dataset == ILMDataset.WIKI_BIO:
+    d = load_dataset("michaelauli/wiki_bio", trust_remote_code=True, split=split)
   else:
     assert False
 
   if shuffle:
-    random.shuffle(d)
+    if isinstance(d, Dataset):
+      d = d.shuffle(seed=42)
+    else:
+      random.shuffle(d)
 
   if limit is not None:
-    d = d[:limit]
+    if isinstance(d, Dataset):
+      d = d.select(range(limit))
+    else:
+      d = d[:limit]
 
   return d
-
 
 def custom(split, data_dir):
   fp = os.path.join(data_dir, '{}.txt'.format(split))
@@ -55,7 +64,7 @@ def custom(split, data_dir):
 
 ABS_DIR = os.path.join(RAW_DATA_DIR, 'arxiv_cs_abstracts')
 def arxiv_cs_abstracts(split='train', data_dir=None, attrs=['title', 'authors', 'categories', 'abstract']):
-  assert split in ['train', 'valid', 'test']
+  assert split in ['train', 'val', 'test']
 
   if data_dir is None:
     data_dir = ABS_DIR
@@ -73,7 +82,7 @@ def arxiv_cs_abstracts(split='train', data_dir=None, attrs=['title', 'authors', 
     a = '\n'.join(a)
 
     if created.startswith('2018'):
-      if split == 'valid':
+      if split == 'val':
         abstracts.append(a)
     elif created.startswith('2019'):
       if split == 'test':
@@ -87,7 +96,7 @@ def arxiv_cs_abstracts(split='train', data_dir=None, attrs=['title', 'authors', 
 
 ROC_STORIES_DIR = os.path.join(RAW_DATA_DIR, 'roc_stories')
 def roc_stories(split='train', data_dir=None, with_titles=True, exclude_nonstandard=True):
-  assert split in ['train', 'valid', 'test', 'test_hand_title']
+  assert split in ['train', 'val', 'test', 'test_hand_title']
 
   if data_dir is None:
     data_dir = ROC_STORIES_DIR
@@ -96,8 +105,8 @@ def roc_stories(split='train', data_dir=None, with_titles=True, exclude_nonstand
     with open(os.path.join(data_dir, 'train_title.txt'), 'r') as f:
       stories = f.read().split('\n\n\n')
     titled = True
-  elif split == 'valid':
-    with open(os.path.join(data_dir, 'valid.txt'), 'r') as f:
+  elif split == 'val':
+    with open(os.path.join(data_dir, 'val.txt'), 'r') as f:
       stories = f.read().split('\n\n\n')
     titled = False
   elif split == 'test':

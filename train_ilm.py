@@ -733,7 +733,7 @@ if __name__ == '__main__':
       train_adam_epsilon=1e-8,
       train_max_grad_norm=1.,
       eval_only=False,
-      eval_examples_tag='valid',
+      eval_examples_tag='val',
       eval_max_num_examples=None,
       eval_batch_size=8,
       eval_sequence_length=256,

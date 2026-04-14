@@ -141,7 +141,7 @@ class TestTrainIlm(unittest.TestCase):
 
     # Make dataset
     random.seed(0)
-    docs = roc_stories('valid')
+    docs = roc_stories('val')
     docs_masked, errors = randomly_mask_dataset(
         docs,
         masker,

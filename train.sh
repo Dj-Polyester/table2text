@@ -7,5 +7,5 @@ python train_ilm.py \
 	${EXAMPLES_DIR} \
 	--seed 0 \
 	--train_examples_tag train \
-	--eval_examples_tag valid \
+	--eval_examples_tag val \
 	--eval_max_num_examples 512

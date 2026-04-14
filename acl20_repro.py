@@ -4,7 +4,7 @@ PREMASKED_DATA = {
     'abs_mixture': 'https://drive.google.com/open?id=1rw45GKP4iRJLzXnRtX-rnk_NeGXOqWkU',
     'lyr_mixture': 'https://drive.google.com/open?id=1jGCjboxlFUF0jqvB0_-L0eeylhKWfZJV',
   },
-  'valid': {
+  'val': {
     'sto_mixture': 'https://drive.google.com/open?id=1Y4HRYrBnqwtdbziF5Q6b5WaIFxJd1v7m',
     'abs_mixture': 'https://drive.google.com/open?id=1hHdXX43qkkm-zpUCJz_iuv1vRRpyfbaP',
     'lyr_mixture': 'https://drive.google.com/open?id=1xR0LC5WHV1UQDPjWTN0HcOQ9C5jsXYef',
@@ -105,8 +105,8 @@ if __name__ == '__main__':
   elif sys.argv[1] == 'data_train':
     data_tag = sys.argv[2][:3]
     out_dir = os.path.join(out_dir, 'data')
-    gdrive_urls = [PREMASKED_DATA[s]['{}_mixture'.format(data_tag)] for s in ['train', 'valid']]
-    local_fns = ['{}_mixture_{}.pkl'.format(data_tag, s) for s in ['train', 'valid']]
+    gdrive_urls = [PREMASKED_DATA[s]['{}_mixture'.format(data_tag)] for s in ['train', 'val']]
+    local_fns = ['{}_mixture_{}.pkl'.format(data_tag, s) for s in ['train', 'val']]
   elif sys.argv[1] == 'data_eval':
     data_tag = sys.argv[2][:3]
     out_dir = os.path.join(out_dir, 'data')

@@ -10,17 +10,7 @@ An interactive webdemo can be found at [chrisdonahue.com/ilm](https://chrisdonah
 
 Recommended Python version: `3.14.3`.
 
-We recommend installing this package using `virtualenv`. After activating the virtual environment, run:
-
-```sh
-git clone git@github.com:chrisdonahue/ilm.git
-cd ilm
-pip install -r requirements.txt
-python -c "import nltk; nltk.download('punkt')"
-pip install -e .
-```
-
-If you run into Python compatibility issues, use `pyenv` to install and select Python `3.14.3`:
+We recommend installing this package using `virtualenv`. 
 
 ```sh
 # Install pyenv (one-time)
@@ -30,11 +20,11 @@ curl https://pyenv.run | bash
 pyenv install 3.14.3
 pyenv local 3.14.3
 
-# Recreate environment with this interpreter
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-pip install -e .
+# Or create environment with the interpreter using uv
+uv venv --python 3.14 --seed
+. .venv/bin/activate
+uv pip install -r requirements.txt
+uv pip install -e .
 ```
 
 ## Training a new model
@@ -46,6 +36,12 @@ The ILM framework involves a two step process of (1) creating ILM training examp
 The process of creating ILM examples involves randomly masking spans in complete text. For example, if the original text is `She ate leftover pasta for lunch`, an ILM example might look like `She ate [blank] for [blank] [sep] leftover pasta [answer] lunch [answer]`. For efficiency reasons, this codebase generates these examples up front before training.
 
 Run `./create_examples.sh` to download the `arxiv_cs_abstracts` dataset and build training/validation ILM examples.
+
+To limit how many documents are processed per split, pass `--limit`:
+
+```sh
+./create_examples.sh --limit 100
+```
 
 Before training, you can optionally preview these examples
 
@@ -64,7 +60,7 @@ Note that the training script automatically performs early stopping based on PPL
 
 Run the project scripts in this order:
 
-1. `./create_examples.sh` - downloads `arxiv_cs_abstracts` and creates `train`/`valid` masked examples.
+1. `./create_examples.sh` - downloads `arxiv_cs_abstracts` and creates `train`/`val` masked examples.
 2. `python preview_ilm_examples.py data/char_masks/arxiv_cs_abstracts/train.pkl` (optional) - inspects generated examples.
 3. `./train.sh` - launches model training with the generated examples.
 
@@ -74,7 +70,7 @@ This codebase includes scripts to download the three datasets used in our paper:
 
 ### Custom datasets
 
-To add a new dataset, first split it into three files: `train.txt`, `valid.txt`, `test.txt`. These files each contain complete documents separated by *three* newline characters, i.e., `'\n\n\n'.join(documents)`. Then, run `create_ilm_examples.py` with the following arguments: `--data_name custom --data_dir path/to/directory/with/splits`.
+To add a new dataset, first split it into three files: `train.txt`, `val.txt`, `test.txt`. These files each contain complete documents separated by *three* newline characters, i.e., `'\n\n\n'.join(documents)`. Then, run `create_ilm_examples.py` with the following arguments: `--data_name custom --data_dir path/to/directory/with/splits`.
 
 ### Custom mask functions
 

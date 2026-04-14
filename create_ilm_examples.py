@@ -179,6 +179,25 @@ if __name__ == '__main__':
   import ilm.mask
   from ilm.mask.util import mask_cls_str_to_type
 
+  import nltk
+
+  
+  def ensure_nltk_punkt_downloaded():
+    required_resources = (
+        ('tokenizers/punkt', 'punkt'),
+        ('tokenizers/punkt_tab/english', 'punkt_tab'),
+    )
+
+    for resource_path, package_name in required_resources:
+      try:
+        nltk.data.find(resource_path)
+      except LookupError:
+        print("Downloading missing NLTK resource '{}'".format(package_name))
+        download_success = nltk.download(package_name)
+        if not download_success:
+          raise ValueError("Unable to download NLTK resource '{}'".format(package_name))
+
+
   parser = ArgumentParser()
 
   parser.add_argument('tag', type=str)
@@ -218,6 +237,7 @@ if __name__ == '__main__':
       ensure_unique_examples=True)
   
   args = parser.parse_args()
+  ensure_nltk_punkt_downloaded()
 
   # Set seed
   seed = args.seed

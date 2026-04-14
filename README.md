@@ -35,13 +35,7 @@ The ILM framework involves a two step process of (1) creating ILM training examp
 
 The process of creating ILM examples involves randomly masking spans in complete text. For example, if the original text is `She ate leftover pasta for lunch`, an ILM example might look like `She ate [blank] for [blank] [sep] leftover pasta [answer] lunch [answer]`. For efficiency reasons, this codebase generates these examples up front before training.
 
-Run `./create_examples.sh` to download the `arxiv_cs_abstracts` dataset and build training/validation ILM examples.
-
-To limit how many documents are processed per split, pass `--limit`:
-
-```sh
-./create_examples.sh --limit 100
-```
+Run the example-generation script to build masked ILM examples for `train` and `val` splits.
 
 Before training, you can optionally preview these examples
 
@@ -52,17 +46,14 @@ python preview_ilm_examples.py \
 
 ### Training an ILM model
 
-Once you've created training examples, run `./train.sh` to start fine-tuning GPT-2 as an ILM model.
+Once you've created training examples, run the training script to fine-tune GPT-2 as an ILM model.
 
 Note that the training script automatically performs early stopping based on PPL on the validation set. To monitor training, you can set up an account on [Weights and Biases](https://www.wandb.com) and add the `--wandb` flag.
 
-### End-to-end order
+### Script quick reference
 
-Run the project scripts in this order:
-
-1. `./create_examples.sh` - downloads `arxiv_cs_abstracts` and creates `train`/`val` masked examples.
-2. `python preview_ilm_examples.py data/char_masks/arxiv_cs_abstracts/train.pkl` (optional) - inspects generated examples.
-3. `./train.sh` - launches model training with the generated examples.
+- `create_examples.sh`: Downloads (if needed) the configured dataset and generates masked ILM examples for `train` and `val` into `data/char_masks/<dataset>`.
+- `train_ilm.sh`: Runs `train_ilm.py` with a preset experiment configuration to train/evaluate on prepared examples.
 
 ## Using custom datasets and mask functions
 

@@ -2,6 +2,7 @@ from enum import Enum
 from collections import defaultdict
 import multiprocessing
 import os
+from pathlib import Path
 import pickle
 import random
 import sys
@@ -15,6 +16,7 @@ from torch.optim import AdamW
 from torch.utils.data import (DataLoader, RandomSampler, SequentialSampler, TensorDataset)
 from tqdm import tqdm
 from transformers import GPT2Config, GPT2LMHeadModel, CONFIG_NAME, WEIGHTS_NAME
+from datasets import load_from_disk
 try:
   import wandb
 except:
@@ -61,26 +63,40 @@ _GLOBAL_WORKER_TARGET = None
 def _worker_target(doc):
   return _GLOBAL_WORKER_TARGET(doc)
 def worker_target_factory(
+    dataset_name,
     tokenizer,
     start_infill_id,
     end_infill_id,
+    tab_sep_id,
+    tab_eq_id,
     mask_type_to_id,
     sequence_length,
     task,
     skip_naive_incomplete):
   def fn(doc_and_char_masks):
-    doc, char_masks = doc_and_char_masks
+    if dataset_name == "wiki_bio":
+      context = doc_and_char_masks["input_text"]["table"]
+      doc = doc_and_char_masks["target_text"]["doc"]
+      char_masks = doc_and_char_masks["target_text"]["char_masks"]
+    else:
+      doc, char_masks = doc_and_char_masks
+      context = None
     try:
       return doc_and_char_masks_to_input_and_tt(
+          dataset_name,
           doc,
           char_masks,
           tokenizer,
           start_infill_id,
           end_infill_id,
+          tab_sep_id,
+          tab_eq_id,
           mask_type_to_id,
           task,
           sequence_length,
-          skip_naive_incomplete)
+          skip_naive_incomplete,
+          context,
+          )
     except Exception as e:
       print(e)
       return None
@@ -88,15 +104,33 @@ def worker_target_factory(
 
 
 def doc_and_char_masks_to_input_and_tt(
+    dataset_name,
     doc,
     char_masks,
     tokenizer,
     start_infill_id,
     end_infill_id,
+    tab_sep_id,
+    tab_eq_id,
     mask_type_to_id,
     task,
     sequence_length,
-    skip_naive_incomplete):
+    skip_naive_incomplete,
+    context,
+    ):
+  if dataset_name == "wiki_bio":
+    context_tokens_ids = [tab_sep_id]
+    for ch, cnt in zip(context["column_header"], context["content"]):
+      ch = ilm.tokenize_util.tokens_to_ids(
+        ilm.tokenize_util.tokenize(ch, tokenizer=tokenizer), tokenizer=tokenizer
+      )
+      cnt = ilm.tokenize_util.tokens_to_ids(
+        ilm.tokenize_util.tokenize(cnt, tokenizer=tokenizer), tokenizer=tokenizer
+      )
+      context_tokens_ids.extend(ch)
+      context_tokens_ids.append(tab_eq_id)
+      context_tokens_ids.extend(cnt)
+      context_tokens_ids.append(tab_sep_id)
   # Tokenize document
   try:
     doc_tokens = ilm.tokenize_util.tokenize(doc, tokenizer=tokenizer)
@@ -133,13 +167,13 @@ def doc_and_char_masks_to_input_and_tt(
   if skip_naive_incomplete:
     contexts_and_answers = [(m, (c, a)) for m, (c, a) in contexts_and_answers if (len(c) + 1 + len(doc_tokens_ids) + 1) <= sequence_length]
 
-  special_ids = set([start_infill_id, end_infill_id] + list(mask_type_to_id.values()))
+  special_ids = set([start_infill_id, end_infill_id, tab_sep_id, tab_eq_id] + list(mask_type_to_id.values()))
 
   inputs = np.zeros((len(contexts_and_answers), sequence_length), dtype=np.uint16)
   tts = np.full((len(contexts_and_answers), sequence_length), TargetType.PAD.value, dtype=np.uint8)
   for i, (mask, (context, answers)) in enumerate(contexts_and_answers):
     # Create example
-    example = []
+    example = context_tokens_ids if dataset_name == "wiki_bio" else []
 
     # (Masked) Context
     if task in [Task.ILM, Task.NAIVE]:
@@ -208,6 +242,8 @@ def masked_dataset_to_inputs_and_tts(
     tokenizer,
     start_infill_id,
     end_infill_id,
+    tab_sep_id,
+    tab_eq_id,
     mask_type_to_id,
     args):
   assert split in ['train', 'eval']
@@ -222,20 +258,28 @@ def masked_dataset_to_inputs_and_tts(
     max_num_examples = args.eval_max_num_examples
     skip_naive_incomplete = args.eval_skip_naive_incomplete
 
-  with open(os.path.join(args.examples_dir, '{}.pkl'.format(examples_tag)), 'rb') as f:
-    dataset = pickle.load(f)
+  dataset_name = Path(args.examples_dir).name
+
+  if dataset_name == "wiki_bio":
+    dataset = load_from_disk(os.path.join(args.examples_dir, examples_tag))
+  else:
+    with open(os.path.join(args.examples_dir, '{}.pkl'.format(examples_tag)), 'rb') as f:
+      dataset = pickle.load(f)
   num_docs = len(dataset)
 
   # Mask and tokenize documents
   global _GLOBAL_WORKER_TARGET
   _GLOBAL_WORKER_TARGET = worker_target_factory(
-      tokenizer,
-      start_infill_id,
-      end_infill_id,
-      mask_type_to_id,
-      sequence_length,
-      Task[args.task.upper()],
-      skip_naive_incomplete)
+    dataset_name,
+    tokenizer,
+    start_infill_id,
+    end_infill_id,
+    tab_sep_id,
+    tab_eq_id,
+    mask_type_to_id,
+    sequence_length,
+    Task[args.task.upper()],
+    skip_naive_incomplete)
   with multiprocessing.Pool(args.data_loader_num_workers) as p:
     docs_inputs_and_tts = list(tqdm(
       p.imap(_worker_target, dataset),
@@ -290,15 +334,19 @@ def train(args):
   base_vocab_size = ilm.tokenize_util.vocab_size(tokenizer)
   start_infill_id = base_vocab_size + 0
   end_infill_id = base_vocab_size + 1
+  tab_sep_id = base_vocab_size + 2
+  tab_eq_id = base_vocab_size + 3
   additional_ids_to_tokens = {
       start_infill_id: '<|startofinfill|>',
-      end_infill_id: '<|endofinfill|>'
+      end_infill_id: '<|endofinfill|>',
+      tab_sep_id: '<|tab_sep|>',
+      tab_eq_id: '<|tab_eq|>',
   }
   mask_cls = ilm.mask.util.mask_cls_str_to_type(args.mask_cls)
   mask_types = mask_cls.mask_types()
   mask_type_to_id = {}
   for i, t in enumerate(mask_types):
-    t_id = base_vocab_size + 2 + i
+    t_id = base_vocab_size + 4 + i
     t_tok = '<|infill_{}|>'.format(mask_cls.mask_type_serialize(t))
     additional_ids_to_tokens[t_id] = t_tok
     mask_type_to_id[t] = t_id
@@ -326,6 +374,8 @@ def train(args):
           tokenizer,
           start_infill_id,
           end_infill_id,
+          tab_sep_id,
+          tab_eq_id,
           mask_type_to_id,
           args)
       if args.data_cache:

@@ -48,7 +48,7 @@ python preview_ilm_examples.py \
 
 Once you've created training examples, run the training script to fine-tune GPT-2 as an ILM model.
 
-Note that the training script automatically performs early stopping based on PPL on the validation set. To monitor training, you can set up an account on [Weights and Biases](https://www.wandb.com) and add the `--wandb` flag.
+Note that the training script automatically performs early stopping based on PPL on the validation set. To monitor training in TensorBoard, add the `--tensorboard` flag (and optionally `--tensorboard_log_dir`).
 
 ### Script quick reference
 

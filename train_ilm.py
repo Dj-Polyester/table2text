@@ -14,13 +14,10 @@ import torch
 import torch.nn.functional as F
 from torch.optim import AdamW
 from torch.utils.data import (DataLoader, RandomSampler, SequentialSampler, TensorDataset)
+from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 from transformers import GPT2Config, GPT2LMHeadModel, CONFIG_NAME, WEIGHTS_NAME
 from datasets import load_from_disk
-try:
-  import wandb
-except:
-  pass
 
 import ilm.constants
 import ilm.mask
@@ -56,6 +53,17 @@ def set_random_seed(seed):
   np.random.seed(seed)
   torch.manual_seed(seed)
   torch.cuda.manual_seed_all(seed)
+
+
+def log_scalar_dict(summary_writer, metrics, step=None):
+  if summary_writer is None:
+    return
+  for key, value in metrics.items():
+    if isinstance(value, (int, float, np.integer, np.floating)):
+      if step is None:
+        summary_writer.add_scalar(key, float(value))
+      else:
+        summary_writer.add_scalar(key, float(value), step)
 
 
 # NOTE: Multiprocessing pickle/closure issue workaround
@@ -325,6 +333,11 @@ def train(args):
   # Create training dir
   os.makedirs(args.train_dir, exist_ok=True)
   resuming = os.path.exists(out_fn_to_fp('step.pkl'))
+  summary_writer = None
+  if args.tensorboard:
+    log_dir = os.path.join(args.tensorboard_log_dir, args.experiment_name)
+    summary_writer = SummaryWriter(log_dir=log_dir)
+    print('TensorBoard logging to {}'.format(log_dir))
 
   # Create tokenizer
   tokenizer = ilm.tokenize_util.Tokenizer[args.tokenizer_name.upper()]
@@ -439,6 +452,8 @@ def train(args):
   if args.train_num_epochs is not None:
     train_num_batches = int(float(train_num_docs * args.train_num_epochs) / args.train_batch_size)
     if train_num_batches == 0:
+      if summary_writer is not None:
+        summary_writer.close()
       return
     print('Maximum number of training steps: {}'.format(train_num_batches / args.train_batch_accumulation))
 
@@ -549,8 +564,7 @@ def train(args):
       print('(Step {}) Eval'.format(step))
     for k, v in eval_dict.items():
       print('{}: {}'.format(k, v))
-    if args.wandb:
-      wandb.log(eval_dict, step=step)
+    log_scalar_dict(summary_writer, eval_dict, step)
 
   else:
     print('Training')
@@ -612,8 +626,7 @@ def train(args):
           print('(Step {}) Eval'.format(step))
           for k, v in eval_dict.items():
             print('{}: {}'.format(k, v))
-          if args.wandb:
-            wandb.log(eval_dict, step=step)
+          log_scalar_dict(summary_writer, eval_dict, step)
 
           if best_eval_loss is None or eval_dict['eval_infill_loss'] < best_eval_loss:
             print('Saving')
@@ -674,11 +687,10 @@ def train(args):
               print('-' * 40)
               print(ilm.tokenize_util.decode([0 if t == -1 else t for t in t0], tokenizer))
 
-          if args.wandb:
-            wandb.log({
-              'loss_context': loss_context_item,
-              'loss_infill': loss_infill_item,
-            }, step=step)
+          log_scalar_dict(summary_writer, {
+            'loss_context': loss_context_item,
+            'loss_infill': loss_infill_item,
+          }, step)
 
         if ((num_batches_complete + 1) % args.train_batch_accumulation) == 0:
           torch.nn.utils.clip_grad_norm_(model.parameters(), args.train_max_grad_norm)
@@ -687,6 +699,9 @@ def train(args):
           step += 1
 
         num_batches_complete += 1
+
+  if summary_writer is not None:
+    summary_writer.close()
 
 
 if __name__ == '__main__':
@@ -712,8 +727,8 @@ if __name__ == '__main__':
   parser.add_argument('train_dir', type=str)
   parser.add_argument('examples_dir', type=str)
   parser.add_argument('--seed', type=int)
-  parser.add_argument('--wandb', action='store_true', dest='wandb')
-  parser.add_argument('--wandb_project_name', type=str)
+  parser.add_argument('--tensorboard', action='store_true', dest='tensorboard')
+  parser.add_argument('--tensorboard_log_dir', type=str)
 
   mask_args = parser.add_argument_group('Mask')
   mask_args.add_argument('--mask_cls', type=str)
@@ -759,14 +774,14 @@ if __name__ == '__main__':
 
   parser.set_defaults(
       seed=None,
-      wandb=False,
-      wandb_project_name='ilm',
+      tensorboard=False,
+      tensorboard_log_dir='runs',
       mask_cls='ilm.mask.hierarchical.MaskHierarchical',
       tokenizer_name='gpt2',
       tokenizer_custom_vocab_fp=None,
       task='ilm',
       data_cache=True,
-      data_loader_num_workers=4,
+      data_loader_num_workers=1,
       model_name='gpt2',
       train_examples_tag='train',
       train_max_num_examples=None,
@@ -791,12 +806,6 @@ if __name__ == '__main__':
       eval_skip_naive_incomplete=False)
   
   args = parser.parse_args()
-
-  if args.wandb:
-    wandb.init(
-        project=args.wandb_project_name,
-        name=args.experiment_name)
-    wandb.config.update(args)
 
   if args.seed is None:
     args.seed = random.randint(0, 1e6)

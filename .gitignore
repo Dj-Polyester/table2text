@@ -3,6 +3,7 @@ ilm.egg-info/
 __pycache__
 .evaltmp
 wandb/
+runs/
 .*.swp
 .ipynb_checkpoints
 *.pyc

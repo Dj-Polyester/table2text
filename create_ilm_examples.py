@@ -5,7 +5,8 @@ import random
 from datasets import Dataset, Features, Sequence, Value
 
 from ilm.mask.util import masked_spans_bounds_valid, masked_spans_overlap
-
+from ilm.tokenize_util import get_language_characters, only_in_lang
+from ilm.constants import SUPPORTED_LANGUAGES, NUMBERS, PYTHON_SPECIAL_CHARS
 
 def randomly_mask_document(
     doc,
@@ -106,11 +107,33 @@ def randomly_mask_dataset(
     **kwargs):
   docs_masked = []
 
+  supported_chars = (
+    "".join(get_language_characters(i) for i in SUPPORTED_LANGUAGES) + 
+    " " + 
+    NUMBERS +
+    PYTHON_SPECIAL_CHARS
+    )
+
+  def clean_text(text):
+    return str(text).replace("''", "'").replace("``", "'").replace("\n", " ")
+
   if isinstance(docs, Dataset):
-    target_texts = docs["target_text"][:]
-    input_texts = docs["input_text"][:]
+    _target_texts = docs["target_text"][:]
+    _input_texts = docs["input_text"][:]
+    its = [
+      (i, t) for i, t in zip(_input_texts, _target_texts) 
+      if only_in_lang(clean_text(i), supported_chars) and only_in_lang(clean_text(t), supported_chars)
+    ]
+    input_texts, target_texts = zip(*its)
   else:
-    target_texts = docs
+    _target_texts = docs
+    target_texts = [
+      i for i in _target_texts 
+      if only_in_lang(clean_text(i), supported_chars)
+    ]
+
+  print(f"({len(input_texts)}/{len(_input_texts)}) input texts have language support")
+  print(f"({len(target_texts)}/{len(_target_texts)}) target texts have language support")
 
   error_to_count_total = Counter()
 

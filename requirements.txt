@@ -5,7 +5,8 @@ nltk==3.9.4
 regex==2026.4.4
 sentencepiece==0.2.1
 tqdm==4.67.3
-wandb==0.25.1
+tensorboard
+tokenizers
 
 # GPU training stack (modern CUDA-compatible wheels).
 torch==2.11.0

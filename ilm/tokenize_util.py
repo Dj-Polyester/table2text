@@ -251,3 +251,35 @@ def align_charspan_to_tokenspan(x, x_tok, char_offset, char_len):
     char_len = char_end - char_offset
 
   return char_offset, char_len, token_offset, token_len
+
+import json
+import urllib.request
+
+def _parse_cldr_charset(pattern: str) -> list[str]:
+    # Example input: "[aàâ æ b cç ...]"
+    if not pattern:
+        return []
+    s = pattern.strip()
+    if s.startswith("[") and s.endswith("]"):
+        s = s[1:-1].strip()
+    if not s:
+        return []
+    tokens = s.split()
+    # Unescape CLDR escaped literals like "\-" or "\:"
+    return "".join([t.replace("\\", "") for t in tokens])
+
+def get_language_characters(lang: str) -> dict:
+    # lang examples: "en", "fr", "de", "ru", "ar", "hi", "ja"
+    url = f"https://raw.githubusercontent.com/unicode-org/cldr-json/main/cldr-json/cldr-misc-full/main/{lang}/characters.json"
+    with urllib.request.urlopen(url) as resp:
+        data = json.load(resp)
+
+    chars = data["main"][lang]["characters"]
+    return (
+         _parse_cldr_charset(chars.get("exemplarCharacters")) +
+         _parse_cldr_charset(chars.get("auxiliary")) +
+         _parse_cldr_charset(chars.get("punctuation"))
+    )
+
+def only_in_lang(text, alphabet):
+    return all(c in alphabet for c in text)

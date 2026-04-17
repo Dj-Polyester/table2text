@@ -1,4 +1,5 @@
 DATASET=michaelauli/wiki_bio
+# DATASET=arxiv_cs_abstracts
 
 CHAR_MASKS_DIR_PARENT=data/char_masks
 DATA_DIR_PARENT=data/raw_data

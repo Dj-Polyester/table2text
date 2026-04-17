@@ -53,7 +53,7 @@ Note that the training script automatically performs early stopping based on PPL
 ### Script quick reference
 
 - `create_examples.sh`: Downloads (if needed) the configured dataset and generates masked ILM examples for `train` and `val` into `data/char_masks/<dataset>`.
-- `train_ilm.sh`: Runs `train_ilm.py` with a preset experiment configuration to train/evaluate on prepared examples.
+- `train.sh`: Runs `train_ilm.py` with a preset experiment configuration to train/evaluate on prepared examples.
 
 ## Using custom datasets and mask functions
 

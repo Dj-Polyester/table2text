@@ -63,7 +63,7 @@ _GLOBAL_WORKER_TARGET = None
 def _worker_target(doc):
   return _GLOBAL_WORKER_TARGET(doc)
 def worker_target_factory(
-    dataset_name,
+    is_hf_dataset,
     tokenizer,
     start_infill_id,
     end_infill_id,
@@ -74,7 +74,7 @@ def worker_target_factory(
     task,
     skip_naive_incomplete):
   def fn(doc_and_char_masks):
-    if dataset_name == "wiki_bio":
+    if is_hf_dataset:
       context = doc_and_char_masks["input_text"]["table"]
       doc = doc_and_char_masks["target_text"]["doc"]
       char_masks = doc_and_char_masks["target_text"]["char_masks"]
@@ -83,7 +83,7 @@ def worker_target_factory(
       context = None
     try:
       return doc_and_char_masks_to_input_and_tt(
-          dataset_name,
+          is_hf_dataset,
           doc,
           char_masks,
           tokenizer,
@@ -104,7 +104,7 @@ def worker_target_factory(
 
 
 def doc_and_char_masks_to_input_and_tt(
-    dataset_name,
+    is_hf_dataset,
     doc,
     char_masks,
     tokenizer,
@@ -118,7 +118,7 @@ def doc_and_char_masks_to_input_and_tt(
     skip_naive_incomplete,
     context,
     ):
-  if dataset_name == "wiki_bio":
+  if is_hf_dataset:
     context_tokens_ids = [tab_sep_id]
     for ch, cnt in zip(context["column_header"], context["content"]):
       ch = ilm.tokenize_util.tokens_to_ids(
@@ -173,7 +173,7 @@ def doc_and_char_masks_to_input_and_tt(
   tts = np.full((len(contexts_and_answers), sequence_length), TargetType.PAD.value, dtype=np.uint8)
   for i, (mask, (context, answers)) in enumerate(contexts_and_answers):
     # Create example
-    example = context_tokens_ids if dataset_name == "wiki_bio" else []
+    example = context_tokens_ids if is_hf_dataset else []
 
     # (Masked) Context
     if task in [Task.ILM, Task.NAIVE]:
@@ -258,10 +258,11 @@ def masked_dataset_to_inputs_and_tts(
     max_num_examples = args.eval_max_num_examples
     skip_naive_incomplete = args.eval_skip_naive_incomplete
 
-  dataset_name = Path(args.examples_dir).name
+  split_examples_dir = os.path.join(args.examples_dir, examples_tag)
+  is_hf_dataset = os.path.isdir(split_examples_dir) and os.path.isfile(os.path.join(split_examples_dir, 'dataset_info.json'))
 
-  if dataset_name == "wiki_bio":
-    dataset = load_from_disk(os.path.join(args.examples_dir, examples_tag))
+  if is_hf_dataset:
+    dataset = load_from_disk(split_examples_dir)
   else:
     with open(os.path.join(args.examples_dir, '{}.pkl'.format(examples_tag)), 'rb') as f:
       dataset = pickle.load(f)
@@ -270,7 +271,7 @@ def masked_dataset_to_inputs_and_tts(
   # Mask and tokenize documents
   global _GLOBAL_WORKER_TARGET
   _GLOBAL_WORKER_TARGET = worker_target_factory(
-    dataset_name,
+    is_hf_dataset,
     tokenizer,
     start_infill_id,
     end_infill_id,
@@ -442,7 +443,7 @@ def train(args):
     print('Maximum number of training steps: {}'.format(train_num_batches / args.train_batch_accumulation))
 
   # Create data iterators
-  print('Creating datasets')
+  print('Creating data iterators')
   if not args.eval_only:
     train_sampler = RandomSampler(train_data)
     train_dataloader = DataLoader(train_data, sampler=train_sampler, batch_size=args.train_batch_size, drop_last=True)

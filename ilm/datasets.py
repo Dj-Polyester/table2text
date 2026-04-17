@@ -11,7 +11,7 @@ class ILMDataset(Enum):
   ROC_STORIES = 2
   ROC_STORIES_NO_TITLE = 3
   LYRICS_STANZAS = 4
-  WIKI_BIO = 5
+  HF = 5
 
 
 def get_dataset(dataset, split, *args, data_dir=None, shuffle=False, limit=None, **kwargs):
@@ -33,8 +33,8 @@ def get_dataset(dataset, split, *args, data_dir=None, shuffle=False, limit=None,
     if data_dir is None:
       data_dir = os.path.join(RAW_DATA_DIR, 'lyrics_stanzas')
     d = custom(split, data_dir=data_dir)
-  elif dataset == ILMDataset.WIKI_BIO:
-    d = load_dataset("michaelauli/wiki_bio", trust_remote_code=True, split=split)
+  elif dataset == ILMDataset.HF:
+    d = load_dataset(data_dir, trust_remote_code=True, split=split)
   else:
     assert False
 

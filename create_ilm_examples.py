@@ -223,7 +223,7 @@ if __name__ == '__main__':
 
   parser.set_defaults(
       seed=None,
-      data_name='wiki_bio',
+      data_name='hf',
       data_dir=None,
       data_split='train',
       mask_cls='ilm.mask.hierarchical.MaskHierarchical',

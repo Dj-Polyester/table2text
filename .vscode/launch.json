@@ -30,12 +30,14 @@
                 "data/char_masks/wiki_bio",
                 "--seed",
                 "0",
+                "--tensorboard",
                 "--train_examples_tag",
                 "train",
                 "--eval_examples_tag",
                 "val",
                 "--data_loader_num_workers",
                 "16",
+                "--data_no_cache",
             ]
         },
         {
@@ -59,6 +61,7 @@
                 "test",
                 "--num_workers",
                 "16",
+                "--data_no_cache",
             ]
         },
         {
@@ -70,11 +73,12 @@
             "cwd": "${workspaceFolder}",
             "console": "integratedTerminal",
             "args": [
-                "experiment_arxiv_cs_abstracts",
+               "experiment_arxiv_cs_abstracts",
                 "train",
                 "data/char_masks/arxiv_cs_abstracts",
                 "--seed",
                 "0",
+                "--tensorboard",
                 "--train_examples_tag",
                 "train",
                 "--eval_examples_tag",

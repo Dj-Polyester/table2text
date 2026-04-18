@@ -5,8 +5,7 @@ import random
 from datasets import Dataset, Features, Sequence, Value
 
 from ilm.mask.util import masked_spans_bounds_valid, masked_spans_overlap
-from ilm.tokenize_util import get_language_characters, only_in_lang
-from ilm.constants import SUPPORTED_LANGUAGES, NUMBERS, PYTHON_SPECIAL_CHARS
+import ilm.tokenize_util
 
 def randomly_mask_document(
     doc,
@@ -107,33 +106,38 @@ def randomly_mask_dataset(
     **kwargs):
   docs_masked = []
 
-  supported_chars = (
-    "".join(get_language_characters(i) for i in SUPPORTED_LANGUAGES) + 
-    " " + 
-    NUMBERS +
-    PYTHON_SPECIAL_CHARS
-    )
-
   def clean_text(text):
     return str(text).replace("''", "'").replace("``", "'").replace("\n", " ")
+
+  def is_gpt2_tokenizable(text):
+    try:
+      cleaned_text = clean_text(text)
+      tokens = ilm.tokenize_util.tokenize(cleaned_text, tokenizer=ilm.tokenize_util.Tokenizer.GPT2)
+      ilm.tokenize_util.tokens_to_ids(tokens, tokenizer=ilm.tokenize_util.Tokenizer.GPT2)
+      return True
+    except Exception:
+      return False
+
+  target_texts = []
+  _target_texts = []
 
   if isinstance(docs, Dataset):
     _target_texts = docs["target_text"][:]
     _input_texts = docs["input_text"][:]
     its = [
       (i, t) for i, t in zip(_input_texts, _target_texts) 
-      if only_in_lang(clean_text(i), supported_chars) and only_in_lang(clean_text(t), supported_chars)
+      if is_gpt2_tokenizable(i) and is_gpt2_tokenizable(t)
     ]
-    input_texts, target_texts = zip(*its)
+    input_texts, target_texts = zip(*its) if its else ([], [])
+    print(f"({len(input_texts)}/{len(_input_texts)}) input texts are GPT-2 tokenizable")
   else:
     _target_texts = docs
     target_texts = [
       i for i in _target_texts 
-      if only_in_lang(clean_text(i), supported_chars)
+      if is_gpt2_tokenizable(i)
     ]
 
-  print(f"({len(input_texts)}/{len(_input_texts)}) input texts have language support")
-  print(f"({len(target_texts)}/{len(_target_texts)}) target texts have language support")
+  print(f"({len(target_texts)}/{len(_target_texts)}) target texts are GPT-2 tokenizable")
 
   error_to_count_total = Counter()
 
@@ -201,24 +205,10 @@ if __name__ == '__main__':
   from ilm.datasets import ILMDataset, get_dataset
   import ilm.mask
   from ilm.mask.util import mask_cls_str_to_type
-
-  import nltk
-
-  
-  def ensure_nltk_punkt_downloaded():
-    required_resources = (
-        ('tokenizers/punkt', 'punkt'),
-        ('tokenizers/punkt_tab/english', 'punkt_tab'),
-    )
-
-    for resource_path, package_name in required_resources:
-      try:
-        nltk.data.find(resource_path)
-      except LookupError:
-        print("Downloading missing NLTK resource '{}'".format(package_name))
-        download_success = nltk.download(package_name)
-        if not download_success:
-          raise ValueError("Unable to download NLTK resource '{}'".format(package_name))
+  from ilm.nltk_data import (
+      ensure_nltk_data_downloaded,
+      required_groups_for_mask_cls,
+  )
 
 
   parser = ArgumentParser()
@@ -260,7 +250,6 @@ if __name__ == '__main__':
       ensure_unique_examples=True)
   
   args = parser.parse_args()
-  ensure_nltk_punkt_downloaded()
 
   # Set seed
   seed = args.seed
@@ -280,6 +269,7 @@ if __name__ == '__main__':
 
   # Create mask function
   mask_type = mask_cls_str_to_type(args.mask_cls)
+  ensure_nltk_data_downloaded(required_groups_for_mask_cls(mask_type))
   if args.mask_arg0 is None:
     masker = mask_type()
   else:

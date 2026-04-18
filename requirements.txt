@@ -1,14 +1,20 @@
-# Python 3.14-compatible modernized stack.
-
 numpy==2.4.4
 nltk==3.9.4
 regex==2026.4.4
 sentencepiece==0.2.1
 tqdm==4.67.3
-tensorboard
-tokenizers
-
-# GPU training stack (modern CUDA-compatible wheels).
-torch==2.11.0
+tensorboard==2.19.0
+tokenizers==0.21.4
 transformers==4.52.4
 datasets==3.6.0
+
+# torch 2.11.0 must be installed from the PyTorch cu128 index to get the
+# sm_120 (Blackwell / RTX 50-series) kernels. The default PyPI wheel is
+# CPU-only on Linux and older CUDA wheels (cu126 and lower) do not include
+# sm_120 binaries, which causes CUBLAS_STATUS_EXECUTION_FAILED on RTX 5080.
+#
+# Install with:
+#   uv pip install --index-url https://download.pytorch.org/whl/cu128 torch==2.11.0
+# or
+#   pip install --index-url https://download.pytorch.org/whl/cu128 torch==2.11.0
+torch==2.11.0

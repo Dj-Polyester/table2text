@@ -137,8 +137,11 @@ def roc_stories(split='train', data_dir=None, with_titles=True, exclude_nonstand
       try:
         if len(sent_tokenize(paragraphs[-1])) != 5:
           continue
-      except:
-        raise Exception('Need to call nltk.download(\'punkt\')')
+      except Exception as e:
+        raise Exception(
+            'NLTK punkt tokenizer data is unavailable ({}). Call '
+            'ilm.nltk_data.ensure_nltk_data_downloaded((\'tokenizer\',)) '
+            'or manually run nltk.download(\'punkt_tab\').'.format(e))
       standardized.append(s)
     stories = standardized
 

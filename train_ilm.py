@@ -14,7 +14,6 @@ import torch
 import torch.nn.functional as F
 from torch.optim import AdamW
 from torch.utils.data import (DataLoader, RandomSampler, SequentialSampler, TensorDataset)
-from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 from transformers import GPT2Config, GPT2LMHeadModel, CONFIG_NAME, WEIGHTS_NAME
 from datasets import load_from_disk
@@ -70,6 +69,33 @@ def log_scalar_dict(summary_writer, metrics, step=None):
 _GLOBAL_WORKER_TARGET = None
 def _worker_target(doc):
   return _GLOBAL_WORKER_TARGET(doc)
+
+
+def _deserialize_hf_char_masks(char_masks, mask_cls):
+  # Arrow can only store ints, so create_ilm_examples.py serializes the enum
+  # mask-type to int via ``int(enum.value)``. Here we reconstruct the original
+  # enum member so downstream ``apply_masked_spans`` finds it in
+  # ``mask_type_to_id`` (which is keyed by the enum, not the int value).
+  mask_types = mask_cls.mask_types()
+  if not mask_types:
+    return [[tuple(span) for span in mask] for mask in char_masks]
+  enum_cls = type(mask_types[0])
+  int_to_enum = {int(t.value) if hasattr(t, 'value') else int(t): t for t in mask_types}
+  deserialized = []
+  for mask in char_masks:
+    new_mask = []
+    for span in mask:
+      t_raw, char_off, char_len = span
+      t = int_to_enum.get(int(t_raw))
+      if t is None:
+        # Fall back to the Enum's own __call__ so we still get a sensible
+        # error rather than a KeyError deep inside apply_masked_spans.
+        t = enum_cls(int(t_raw))
+      new_mask.append((t, int(char_off), int(char_len)))
+    deserialized.append(new_mask)
+  return deserialized
+
+
 def worker_target_factory(
     is_hf_dataset,
     tokenizer,
@@ -80,12 +106,15 @@ def worker_target_factory(
     mask_type_to_id,
     sequence_length,
     task,
-    skip_naive_incomplete):
+    skip_naive_incomplete,
+    mask_cls=None):
   def fn(doc_and_char_masks):
     if is_hf_dataset:
       context = doc_and_char_masks["input_text"]["table"]
       doc = doc_and_char_masks["target_text"]["doc"]
       char_masks = doc_and_char_masks["target_text"]["char_masks"]
+      if mask_cls is not None:
+        char_masks = _deserialize_hf_char_masks(char_masks, mask_cls)
     else:
       doc, char_masks = doc_and_char_masks
       context = None
@@ -106,7 +135,7 @@ def worker_target_factory(
           context,
           )
     except Exception as e:
-      print(e)
+      print('Worker failed on document:', repr(e))
       return None
   return fn
 
@@ -139,13 +168,17 @@ def doc_and_char_masks_to_input_and_tt(
       context_tokens_ids.append(tab_eq_id)
       context_tokens_ids.extend(cnt)
       context_tokens_ids.append(tab_sep_id)
+  # Per-document error counts; summed across workers by the caller so failures
+  # surface once at the end rather than being silently swallowed.
+  error_to_count = defaultdict(int)
+
   # Tokenize document
   try:
     doc_tokens = ilm.tokenize_util.tokenize(doc, tokenizer=tokenizer)
     doc_tokens_ids = ilm.tokenize_util.tokens_to_ids(doc_tokens, tokenizer=tokenizer)
-  except:
+  except Exception as e:
     doc_tokens = None
-    #error_to_count['Failed to tokenize document'] += len(char_masks)
+    error_to_count['Failed to tokenize document: {}'.format(e)] += len(char_masks)
 
   # Align character masks to tokens
   tok_masks = []
@@ -153,8 +186,8 @@ def doc_and_char_masks_to_input_and_tt(
     for char_mask in char_masks:
       try:
         tok_mask = ilm.mask.util.align_char_mask_to_tokens(doc, doc_tokens, char_mask)
-      except:
-        #error_to_count['Failed to align character-level mask to tokens'] += 1
+      except Exception as e:
+        error_to_count['Failed to align character-level mask to tokens: {}'.format(e)] += 1
         continue
       tok_masks.append(tok_mask)
 
@@ -166,14 +199,18 @@ def doc_and_char_masks_to_input_and_tt(
           doc_tokens_ids,
           tok_mask,
           mask_type_to_id)
-    except:
-      #error_to_count['Failed to apply mask'] += 1
+    except Exception as e:
+      error_to_count['Failed to apply mask: {}'.format(e)] += 1
       continue
     contexts_and_answers.append((tok_mask, ca))
 
   # Skip examples that would be incomplete for Task.NAIVE (typically the longest task)
   if skip_naive_incomplete:
+    n_before = len(contexts_and_answers)
     contexts_and_answers = [(m, (c, a)) for m, (c, a) in contexts_and_answers if (len(c) + 1 + len(doc_tokens_ids) + 1) <= sequence_length]
+    dropped = n_before - len(contexts_and_answers)
+    if dropped:
+      error_to_count['Skipped as naive-incomplete'] += dropped
 
   special_ids = set([start_infill_id, end_infill_id, tab_sep_id, tab_eq_id] + list(mask_type_to_id.values()))
 
@@ -212,7 +249,7 @@ def doc_and_char_masks_to_input_and_tt(
 
     if len(example) > sequence_length:
       example = example[:sequence_length]
-      #warning_to_count['Example longer than sequence length'] += 1
+      error_to_count['Example truncated to sequence length'] += 1
 
     # Find special tokens
     context_special_idxs = [l for l, t in enumerate(example) if l < context_len and t in special_ids]
@@ -242,7 +279,7 @@ def doc_and_char_masks_to_input_and_tt(
       for l in infill_special_idxs:
         tts[i, l] = TargetType.INFILL_SPECIAL.value
 
-  return inputs, tts
+  return inputs, tts, dict(error_to_count)
 
 
 def masked_dataset_to_inputs_and_tts(
@@ -253,7 +290,8 @@ def masked_dataset_to_inputs_and_tts(
     tab_sep_id,
     tab_eq_id,
     mask_type_to_id,
-    args):
+    args,
+    mask_cls=None):
   assert split in ['train', 'eval']
   if split == 'train':
     examples_tag = args.train_examples_tag
@@ -288,14 +326,36 @@ def masked_dataset_to_inputs_and_tts(
     mask_type_to_id,
     sequence_length,
     Task[args.task.upper()],
-    skip_naive_incomplete)
+    skip_naive_incomplete,
+    mask_cls=mask_cls)
   with multiprocessing.Pool(args.data_loader_num_workers) as p:
     docs_inputs_and_tts = list(tqdm(
       p.imap(_worker_target, dataset),
-      total=len(dataset)))
+      total=len(dataset),
+      desc='Masking+tokenizing {}'.format(split)))
 
-  inputs = np.concatenate([i for i, _ in docs_inputs_and_tts], axis=0)
-  tts = np.concatenate([t for _, t in docs_inputs_and_tts], axis=0)
+  num_failed_docs = sum(1 for r in docs_inputs_and_tts if r is None)
+  results = [r for r in docs_inputs_and_tts if r is not None]
+  if not results:
+    raise RuntimeError(
+        'All {} documents failed during mask/tokenize; no examples were '
+        'produced. Check that char_masks in the HF dataset match '
+        'mask_cls ({}).'.format(num_docs, mask_cls))
+
+  inputs = np.concatenate([i for i, _, _ in results], axis=0)
+  tts = np.concatenate([t for _, t, _ in results], axis=0)
+
+  error_to_count_total = defaultdict(int)
+  for _, _, errs in results:
+    for k, v in errs.items():
+      error_to_count_total[k] += v
+  if num_failed_docs:
+    error_to_count_total['Document-level worker exception'] += num_failed_docs
+  if error_to_count_total:
+    total_errors = sum(error_to_count_total.values())
+    print('Non-fatal errors while preparing {} data ({} total):'.format(split, total_errors))
+    for k, v in sorted(error_to_count_total.items(), key=lambda kv: -kv[1]):
+      print('  * ({} times) {}'.format(v, k))
 
   # TODO: Don't bother doing all the work if we're not going to use it
   if max_num_examples is not None:
@@ -317,6 +377,15 @@ def tts_to_labels(inputs, tts, label_tts):
       torch.full_like(inputs, -1))
 
 
+def get_model_logits(model, inputs):
+  outputs = model(inputs)
+  # transformers >=4 returns ModelOutput with `.logits`,
+  # while older versions return tuples.
+  if hasattr(outputs, 'logits'):
+    return outputs.logits
+  return outputs[0]
+
+
 def train(args):
   # Init device
   n_gpu = torch.cuda.device_count()
@@ -335,6 +404,10 @@ def train(args):
   resuming = os.path.exists(out_fn_to_fp('step.pkl'))
   summary_writer = None
   if args.tensorboard:
+    try:
+      from torch.utils.tensorboard import SummaryWriter
+    except ImportError:
+      raise ImportError('TensorBoard logging requested (--tensorboard) but tensorboard is not installed.')
     log_dir = os.path.join(args.tensorboard_log_dir, args.experiment_name)
     summary_writer = SummaryWriter(log_dir=log_dir)
     print('TensorBoard logging to {}'.format(log_dir))
@@ -391,7 +464,8 @@ def train(args):
           tab_sep_id,
           tab_eq_id,
           mask_type_to_id,
-          args)
+          args,
+          mask_cls=mask_cls)
       if args.data_cache:
         np.save(out_fn_to_fp('train_inp.npy'), train_inputs)
         np.save(out_fn_to_fp('train_tts.npy'), train_tts)
@@ -401,9 +475,15 @@ def train(args):
     print(train_tt_to_count)
     num_unmasked = train_tt_to_count.get(TargetType.CONTEXT, 0)
     num_masked = train_tt_to_count.get(TargetType.INFILL, 0)
-    print('Mask rate (tokens): {:.4f}'.format(num_masked / (num_unmasked + num_masked)))
+    print('Mask rate (tokens): {:.4f}'.format(num_masked / max(num_unmasked + num_masked, 1)))
     print('{} documents, {} examples'.format(train_num_docs, train_inputs.shape[0]))
     print(train_inputs.shape, train_inputs.dtype, train_tts.shape, train_tts.dtype)
+    if num_masked == 0:
+      raise RuntimeError(
+          'Training data contains zero INFILL target tokens. Training would '
+          'provide no learning signal. Delete the cached .npy arrays in '
+          '{} and re-run to regenerate, or double-check that the mask '
+          'pipeline produces non-empty masks.'.format(args.train_dir))
     train_data = TensorDataset(
         torch.from_numpy(train_inputs.astype(np.int64)),
         torch.from_numpy(train_tts))
@@ -428,8 +508,11 @@ def train(args):
         tokenizer,
         start_infill_id,
         end_infill_id,
+        tab_sep_id,
+        tab_eq_id,
         mask_type_to_id,
-        args)
+        args,
+        mask_cls=mask_cls)
     if args.data_cache:
       np.save(out_fn_to_fp('eval_inp.npy'), eval_inputs)
       np.save(out_fn_to_fp('eval_tts.npy'), eval_tts)
@@ -439,9 +522,14 @@ def train(args):
   print(eval_tt_to_count)
   num_unmasked = eval_tt_to_count.get(TargetType.CONTEXT, 0)
   num_masked = eval_tt_to_count.get(TargetType.INFILL, 0)
-  print('Mask rate (tokens): {:.4f}'.format(num_masked / (num_unmasked + num_masked)))
+  print('Mask rate (tokens): {:.4f}'.format(num_masked / max(num_unmasked + num_masked, 1)))
   print('{} documents, {} examples'.format(eval_num_docs, eval_inputs.shape[0]))
   print(eval_inputs.shape, eval_inputs.dtype, eval_tts.shape, eval_tts.dtype)
+  if num_masked == 0:
+    raise RuntimeError(
+        'Eval data contains zero INFILL target tokens. Delete the cached '
+        '.npy arrays in {} and re-run to regenerate, or check the mask '
+        'pipeline.'.format(args.train_dir))
   eval_data = TensorDataset(
       torch.from_numpy(eval_inputs.astype(np.int64)),
       torch.from_numpy(eval_tts))
@@ -529,10 +617,10 @@ def train(args):
     eval_start = time.time()
     eval_token_counts = defaultdict(int)
     eval_token_loss_sums = defaultdict(float)
-    for i, eval_batch in enumerate(eval_dataloader):
+    for i, eval_batch in enumerate(tqdm(eval_dataloader, desc='Eval', leave=False)):
       with torch.no_grad():
         eval_inputs, eval_tts = tuple(t.to(device) for t in eval_batch)
-        eval_logits, _ = model(eval_inputs)
+        eval_logits = get_model_logits(model, eval_inputs)
         eval_logits_relevant = eval_logits[:, :-1].contiguous().view(-1, eval_logits.shape[-1])
 
         for tag, tts in [
@@ -570,7 +658,9 @@ def train(args):
     print('Training')
     set_random_seed(args.seed)
     best_eval_loss = None
-    num_save = -1
+    # num_save starts at 0 when skip_initial_eval is requested so the first
+    # `int(elapsed / train_eval_secs) > num_save` check at t~=0 is skipped.
+    num_save = 0 if args.skip_initial_eval else -1
     num_summary = -1
     num_batches_complete = step * args.train_batch_accumulation
     start = time.time()
@@ -593,10 +683,13 @@ def train(args):
           eval_start = time.time()
           eval_token_counts = defaultdict(int)
           eval_token_loss_sums = defaultdict(float)
-          for i, eval_batch in enumerate(eval_dataloader):
+          for i, eval_batch in enumerate(tqdm(
+              eval_dataloader,
+              desc='Eval at step {}'.format(step),
+              leave=False)):
             with torch.no_grad():
               eval_inputs, eval_tts = tuple(t.to(device) for t in eval_batch)
-              eval_logits, _ = model(eval_inputs)
+              eval_logits = get_model_logits(model, eval_inputs)
               eval_logits_relevant = eval_logits[:, :-1].contiguous().view(-1, eval_logits.shape[-1])
 
               for tag, tts in [
@@ -647,7 +740,7 @@ def train(args):
         # TODO: Option to skip training on INFILL_REDUNDANT?
         # NOTE: This would give Task.NAIVE/Task.LM less supervision overall but put them more in line with the supervision that Task.ILM and Task.NO_CONTEXT_ILM receive
         labels_infill = tts_to_labels(inputs, tts, [TargetType.INFILL, TargetType.INFILL_SPECIAL, TargetType.INFILL_REDUNDANT])
-        logits, _ = model(inputs)
+        logits = get_model_logits(model, inputs)
         logits_relevant = logits[:, :-1].contiguous().view(-1, logits.shape[-1])
         loss_context = F.cross_entropy(
             logits_relevant,
@@ -758,6 +851,13 @@ if __name__ == '__main__':
   train_args.add_argument('--train_skip_naive_incomplete', action='store_true', dest='train_skip_naive_incomplete')
   train_args.add_argument('--train_eval_secs', type=float)
   train_args.add_argument('--train_summary_secs', type=float)
+  train_args.add_argument(
+      '--skip_initial_eval',
+      action='store_true',
+      dest='skip_initial_eval',
+      help='Skip the baseline evaluation performed at step 0, before any '
+           'training. Useful when iterating quickly; the usual periodic '
+           'evals (every --train_eval_secs) still run.')
   train_args.add_argument('--train_minimal_supervision', action='store_false', dest='train_context')
   train_args.add_argument('--train_learning_rate', type=float)
   train_args.add_argument('--train_weight_decay', type=float)
@@ -798,10 +898,11 @@ if __name__ == '__main__':
       train_weight_decay=0.,
       train_adam_epsilon=1e-8,
       train_max_grad_norm=1.,
+      skip_initial_eval=False,
       eval_only=False,
       eval_examples_tag='val',
       eval_max_num_examples=None,
-      eval_batch_size=8,
+      eval_batch_size=32,
       eval_sequence_length=256,
       eval_skip_naive_incomplete=False)
   

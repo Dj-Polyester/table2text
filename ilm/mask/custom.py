@@ -43,8 +43,12 @@ class MaskProperNoun(MaskFn):
   def __init__(self, p=1.):
     try:
       pos_tag(['Ensure', 'tagger'])
-    except:
-      raise ValueError('Need to call nltk.download(\'averaged_perceptron_tagger\')')
+    except Exception as e:
+      raise ValueError(
+          'NLTK POS tagger data is unavailable ({}). Call '
+          'ilm.nltk_data.ensure_nltk_data_downloaded((\'tokenizer\', \'tagger\')) '
+          'or manually run nltk.download(\'averaged_perceptron_tagger_eng\') '
+          'before instantiating MaskProperNoun.'.format(e))
     self.p = p
 
   @classmethod

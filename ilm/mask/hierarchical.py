@@ -20,8 +20,12 @@ class MaskHierarchical(MaskFn):
       from nltk.tokenize import sent_tokenize
       try:
         sent_tokenize('Ensure punkt installed.')
-      except:
-        raise ValueError('Need to call nltk.download(\'punkt\')')
+      except Exception as e:
+        raise ValueError(
+            'NLTK punkt tokenizer data is unavailable ({}). Call '
+            'ilm.nltk_data.ensure_nltk_data_downloaded((\'tokenizer\',)) '
+            'or manually run nltk.download(\'punkt_tab\') before '
+            'instantiating MaskHierarchical.'.format(e))
     self.p = p
     self.verse = verse
 

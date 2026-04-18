@@ -10,3 +10,4 @@ runs/
 *.pkl
 *.npy
 .python-version
+model

@@ -89,7 +89,8 @@ if __name__ == '__main__':
     out_dir = os.environ['ILM_DIR']
   except:
     out_dir = '/tmp/ilm'
-
+  gdrive_urls = []
+  local_fns = []
   if sys.argv[1] == 'model':
     data_tag, model_type = sys.argv[2:]
     model_tag = '{}_{}'.format(data_tag[:3], model_type)

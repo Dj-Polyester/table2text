@@ -1,6 +1,6 @@
 Table implementation:
     Add serialized representation to the prompt
     ☐ Start debugging train_ilm.py doc_and_char_masks_to_input_and_tt @started(26-04-05 20:37)
-    ☐ Add Task for table implementation
-    ☐ Serialize table and add to the prompt before inputs
-    ☐ Add new tokens to TargetType.CONTEXT_SPECIAL for table cells for tts
+    ✔ Add Task for table implementation @started(26-04-19 12:47) @done(26-04-19 20:02) @lasted(7h16m)
+    ✔ Serialize table and add to the prompt before inputs @done(26-04-19 12:48)
+    ✔ Add new tokens to TargetType.CONTEXT_SPECIAL for table cells for tts @done(26-04-19 12:48)
